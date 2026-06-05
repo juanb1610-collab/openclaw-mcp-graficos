@@ -1,116 +1,109 @@
 import os
 import uuid
 from mcp.server.fastmcp import FastMCP
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from http.server import SimpleHTTPRequestHandler
 from threading import Thread
 import socketserver
+import json
 
 mcp = FastMCP("VisualClaw_Pro")
 
 @mcp.tool()
 def generar_dashboard_completo(
     titulo: str, 
-    kpi_nombre: str, kpi_valor: float,
+    kpi_nombre: str, kpi_valor: str,
     linea_x: list, linea_y: list,
     barras_x: list, barras_y: list,
     pie_labels: list, pie_values: list,
-    conclusiones_texto: str  # <-- NUEVO: Cuadro de texto para el análisis
+    conclusiones_texto: str
 ) -> str:
     """
-    Genera un Dashboard de BI completo con gráficos y un cuadro de texto estructurado para conclusiones.
-    Retorna el enlace directo para visualización en pantalla completa.
+    Genera un Dashboard nativo en Chart.js para evitar bloqueos de carga ("Cargando...").
     """
     
-    # 1. Configurar la cuadrícula de gráficos
-    fig = make_subplots(
-        rows=2, cols=2,
-        specs=[[{"type": "indicator"}, {"type": "xy"}],
-               [{"type": "xy"}, {"type": "domain"}]],
-        subplot_titles=("Métrica Destacada", "Tendencia Temporal", "Comparativa de Categorías", "Distribución de Mercado")
-    )
+    # Aseguramos que las listas pasen correctamente como JSON seguro para JavaScript
+    linea_x_json = json.dumps(linea_x)
+    linea_y_json = json.dumps(linea_y)
+    barras_x_json = json.dumps(barras_x)
+    barras_y_json = json.dumps(barras_y)
+    pie_labels_json = json.dumps(pie_labels)
+    pie_values_json = json.dumps(pie_values)
 
-    fig.add_trace(go.Indicator(
-        mode="number+delta", value=kpi_valor, title={'text': kpi_nombre}
-    ), row=1, col=1)
-
-    fig.add_trace(go.Scatter(x=linea_x, y=linea_y, name="Tendencia", line=dict(color='#11caa0', width=4)), row=1, col=2)
-    fig.add_trace(go.Bar(x=barras_x, y=barras_y, name="Categorías", marker_color='#3b82f6'), row=2, col=1)
-    fig.add_trace(go.Pie(labels=pie_labels, values=pie_values, name="Desglose", hole=.4), row=2, col=2)
-
-    fig.update_layout(
-        template="plotly_dark",
-        height=800,
-        showlegend=False,
-        paper_bgcolor="#0f172a",
-        plot_bgcolor="#0f172a",
-        margin=dict(l=40, r=40, t=50, b=40)
-    )
-
-    # 2. Generar el HTML del gráfico por separado
-    plotly_html = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
-    # 3. Construir una página web completa e incluir el cuadro de conclusiones con CSS elegante
     html_final = f"""
     <!DOCTYPE html>
     <html lang="es">
     <head>
         <meta charset="UTF-8">
         <title>{titulo}</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
-            body {{
-                background-color: #0b0f19;
-                color: #f8fafc;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                margin: 0;
-                padding: 20px;
-            }}
-            .container {{
-                max-width: 1400px;
-                margin: 0 auto;
-            }}
-            .header {{
-                background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-                padding: 25px;
-                border-radius: 12px;
-                margin-bottom: 20px;
-                border: 1px solid #334155;
-            }}
-            .conclusiones-box {{
-                background-color: #1e293b;
-                border-left: 6px solid #3b82f6;
-                padding: 20px;
-                border-radius: 8px;
-                margin-top: 25px;
-                font-size: 16px;
-                line-height: 1.6;
-                color: #cbd5e1;
-            }}
-            h1 {{ margin: 0; font-size: 28px; color: #fff; }}
+            body {{ background-color: #0b0f19; color: #f8fafc; font-family: sans-serif; padding: 20px; }}
+            .container {{ max-width: 1400px; margin: 0 auto; }}
+            .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }}
+            .card {{ background-color: #0f172a; padding: 20px; border-radius: 12px; border: 1px solid #1e293b; }}
+            .kpi-card {{ background-color: #1e293b; text-align: center; padding: 40px; border-radius: 12px; }}
+            .conclusiones-box {{ background-color: #1e293b; border-left: 6px solid #3b82f6; padding: 20px; border-radius: 8px; margin-top: 25px; }}
         </style>
     </head>
     <body>
         <div class="container">
-            <div class="header">
-                <h1>📊 {titulo}</h1>
-                <p style="color: #94a3b8; margin: 5px 0 0 0;">Análisis Automatizado OpenClaw + MCP</p>
+            <div class="card">
+                <h2>📊 {titulo}</h2>
+                <p style="color: #94a3b8;">Reporte Maestro Sincronizado</p>
             </div>
             
-            <div style="background-color: #0f172a; border-radius: 12px; padding: 10px; border: 1px solid #1e293b;">
-                {plotly_html}
+            <div class="grid">
+                <div class="kpi-card">
+                    <h3 style="color: #94a3b8; margin:0;">{kpi_nombre}</h3>
+                    <h1 style="font-size: 42px; margin: 10px 0;">{kpi_valor}</h1>
+                </div>
+                
+                <div class="card">
+                    <h3>Tendencia Temporal</h3>
+                    <canvas id="chartLineas"></canvas>
+                </div>
+                
+                <div class="card">
+                    <h3>Pareto / Comparativa de Ventas</h3>
+                    <canvas id="chartBarras"></canvas>
+                </div>
+                
+                <div class="card">
+                    <h3>Mix de Portafolio</h3>
+                    <canvas id="chartPie"></canvas>
+                </div>
             </div>
             
             <div class="conclusiones-box">
-                <h3 style="margin-top: 0; color: #3b82f6; font-size: 18px;">📝 Conclusiones Ejecutivas y Recomendaciones</h3>
-                {conclusiones_texto.replace('\n', '<br>')}
+                <h3 style="margin-top:0; color:#3b82f6;">📝 Conclusiones Ejecutivas</h3>
+                <p style="color:#cbd5e1; line-height:1.6;">{conclusiones_texto.replace('\n', '<br>')}</p>
             </div>
         </div>
+
+        <script>
+            // Renderizado forzado inmediato al cargar la página
+            new Chart(document.getElementById('chartLineas'), {{
+                type: 'line',
+                data: {{ labels: {linea_x_json}, datasets: [{{ label: 'Ventas', data: {linea_y_json}, borderColor: '#11caa0', tension: 0.1 }}] }},
+                options: {{ responsive: true, plugins: {{ legend: {{ display: false }} }} }}
+            }});
+
+            new Chart(document.getElementById('chartBarras'), {{
+                type: 'bar',
+                data: {{ labels: {barras_x_json}, datasets: [{{ label: 'Monto', data: {barras_y_json}, backgroundColor: '#3b82f6' }}] }},
+                options: {{ responsive: true, plugins: {{ legend: {{ display: false }} }} }}
+            }});
+
+            new Chart(document.getElementById('chartPie'), {{
+                type: 'doughnut',
+                data: {{ labels: {pie_labels_json}, datasets: [{{ data: {pie_values_json}, backgroundColor: ['#3b82f6', '#11caa0', '#f59e0b'] }}] }},
+                options: {{ responsive: true }}
+            }});
+        </script>
     </body>
     </html>
     """
 
-    # 4. Guardar archivo en la carpeta pública
     os.makedirs("public", exist_ok=True)
     nombre_archivo = f"dashboard_bi_{uuid.uuid4().hex[:6]}.html"
     
@@ -118,10 +111,7 @@ def generar_dashboard_completo(
         f.write(html_final)
     
     dominio = os.getenv("RAILWAY_PUBLIC_DOMAIN", "http://localhost:8080")
-    url_final = f"{dominio}/public/{nombre_archivo}"
-    
-    # IMPORTANTE: Obligamos al agente a entregar el enlace limpio en texto
-    return f"URL_DIRECTA: {url_final}"
+    return f"URL_DIRECTA: {dominio}/public/{nombre_archivo}"
 
 def levantar_servidor_web():
     PORT = int(os.getenv("PORT", 8080))
